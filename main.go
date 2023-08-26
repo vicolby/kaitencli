@@ -5,8 +5,12 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"net/http"
 	"os"
+	"strconv"
+	"time"
 
+	"github.com/olekukonko/tablewriter"
 	"github.com/urfave/cli/v2"
 )
 
@@ -20,7 +24,13 @@ type Context struct {
 	Active bool   `json:"active"`
 }
 
+type Space struct {
+	Id    int    `json:"id"`
+	Ttile string `json:"title"`
+}
+
 var contexts Contexts
+var spaces []Space
 
 func contains(account string, accounts []string) bool {
 	for _, a := range accounts {
@@ -29,6 +39,25 @@ func contains(account string, accounts []string) bool {
 		}
 	}
 	return false
+}
+
+func call(url string, method string, bearer string) (*http.Response, error) {
+	client := &http.Client{
+		Timeout: time.Second * 10,
+	}
+	req, err := http.NewRequest(method, url, nil)
+	if err != nil {
+		return nil, fmt.Errorf("Got error %s", err.Error())
+	}
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", fmt.Sprintf("Bearer %v", bearer))
+
+	response, err := client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("Got error %s", err.Error())
+	}
+	return response, nil
 }
 
 func main() {
@@ -50,14 +79,26 @@ func main() {
 
 	var accounts []string
 
-	// var apiKey string
+	var apiKey string
 
 	for _, context := range contexts.Contexts {
 		accounts = append(accounts, context.Name)
-		// if context.Active == true {
-		// 	apiKey = context.Key
-		// }
+		if context.Active == true {
+			apiKey = context.Key
+		}
 	}
+
+	table := tablewriter.NewWriter(os.Stdout)
+	table.SetAutoWrapText(false)
+	table.SetAutoFormatHeaders(true)
+	table.SetHeaderAlignment(tablewriter.ALIGN_LEFT)
+	table.SetAlignment(tablewriter.ALIGN_LEFT)
+	table.SetCenterSeparator("")
+	table.SetColumnSeparator("")
+	table.SetRowSeparator("")
+	table.SetHeaderLine(false)
+	table.SetTablePadding("\t") // pad with tabs
+	table.SetNoWhiteSpace(true)
 
 	app := &cli.App{
 		UseShortOptionHandling: true,
@@ -67,8 +108,13 @@ func main() {
 				Usage: "show accounts",
 				Action: func(cCtx *cli.Context) error {
 					for _, context := range contexts.Contexts {
-						fmt.Printf("Name: %s\nActive: %v\n\n", context.Name, context.Active)
+						var accRow []string
+						accRow = append(accRow, context.Name)
+						accRow = append(accRow, strconv.FormatBool(context.Active))
+						table.Append(accRow)
 					}
+					table.SetHeader([]string{"Name", "Active"})
+					table.Render()
 					return nil
 				},
 				Subcommands: []*cli.Command{
@@ -158,6 +204,32 @@ func main() {
 
 						},
 					},
+				},
+			},
+			{
+				Name:  "spaces",
+				Usage: "get list of spaces",
+				Action: func(cCtx *cli.Context) error {
+					resp, err := call("https://rubbles-stories.kaiten.ru/api/latest/spaces", "GET", apiKey)
+					if err != nil {
+						return fmt.Errorf("Could not get list of spaces")
+					}
+					defer resp.Body.Close()
+
+					err = json.NewDecoder(resp.Body).Decode(&spaces)
+					if err != nil {
+						log.Fatal(err)
+					}
+
+					for _, space := range spaces {
+						var spaceRow []string
+						spaceRow = append(spaceRow, strconv.Itoa(space.Id))
+						spaceRow = append(spaceRow, space.Ttile)
+						table.Append(spaceRow)
+					}
+					table.SetHeader([]string{"Id", "Title"})
+					table.Render()
+					return nil
 				},
 			},
 		},
