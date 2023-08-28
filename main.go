@@ -26,11 +26,18 @@ type Context struct {
 
 type Space struct {
 	Id    int    `json:"id"`
-	Ttile string `json:"title"`
+	Title string `json:"title"`
+}
+
+type Board struct {
+	Id          int    `json:"id"`
+	Title       string `json:"title"`
+	Description string `json:"description"`
 }
 
 var contexts Contexts
 var spaces []Space
+var boards []Board
 
 func contains(account string, accounts []string) bool {
 	for _, a := range accounts {
@@ -207,29 +214,75 @@ func main() {
 				},
 			},
 			{
-				Name:  "spaces",
-				Usage: "get list of spaces",
+				Name:  "get",
+				Usage: "get info about entity",
 				Action: func(cCtx *cli.Context) error {
-					resp, err := call("https://rubbles-stories.kaiten.ru/api/latest/spaces", "GET", apiKey)
-					if err != nil {
-						return fmt.Errorf("Could not get list of spaces")
+					if cCtx.NArg() <= 0 {
+						return fmt.Errorf("Command needs at least one argument\nUse -h flag to show available options")
 					}
-					defer resp.Body.Close()
-
-					err = json.NewDecoder(resp.Body).Decode(&spaces)
-					if err != nil {
-						log.Fatal(err)
-					}
-
-					for _, space := range spaces {
-						var spaceRow []string
-						spaceRow = append(spaceRow, strconv.Itoa(space.Id))
-						spaceRow = append(spaceRow, space.Ttile)
-						table.Append(spaceRow)
-					}
-					table.SetHeader([]string{"Id", "Title"})
-					table.Render()
 					return nil
+				},
+				Subcommands: []*cli.Command{
+					{
+						Name:  "spaces",
+						Usage: "get list of spaces",
+						Action: func(cCtx *cli.Context) error {
+							resp, err := call("https://rubbles-stories.kaiten.ru/api/latest/spaces", "GET", apiKey)
+							if err != nil {
+								return fmt.Errorf("Could not get list of spaces")
+							}
+							defer resp.Body.Close()
+
+							err = json.NewDecoder(resp.Body).Decode(&spaces)
+							if err != nil {
+								log.Fatal(err)
+							}
+
+							for _, space := range spaces {
+								var spaceRow []string
+								spaceRow = append(spaceRow, strconv.Itoa(space.Id))
+								spaceRow = append(spaceRow, space.Title)
+								table.Append(spaceRow)
+							}
+							table.SetHeader([]string{"Id", "Title"})
+							table.Render()
+							return nil
+						},
+					},
+					{
+						Name: "boards",
+						Flags: []cli.Flag{
+							&cli.StringFlag{
+								Name:     "space",
+								Usage:    "space id",
+								Required: true,
+							},
+						},
+						Usage: "get list of boards",
+						Action: func(cCtx *cli.Context) error {
+							resp, err := call(fmt.Sprintf("https://rubbles-stories.kaiten.ru/api/latest/spaces/%v/boards", cCtx.String("space")), "GET", apiKey)
+							if err != nil {
+								return fmt.Errorf("Could not get list of boards")
+							}
+							defer resp.Body.Close()
+
+							err = json.NewDecoder(resp.Body).Decode(&boards)
+							if err != nil {
+								log.Fatal(err)
+							}
+
+							for _, board := range boards {
+								var boardRow []string
+								boardRow = append(boardRow, strconv.Itoa(board.Id))
+								boardRow = append(boardRow, board.Title)
+								boardRow = append(boardRow, board.Description)
+								table.Append(boardRow)
+							}
+							table.SetHeader([]string{"Id", "Title", "Description"})
+							table.Render()
+							return nil
+						},
+					},
 				},
 			},
 		},
