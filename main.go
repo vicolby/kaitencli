@@ -30,14 +30,48 @@ type Space struct {
 }
 
 type Board struct {
-	Id          int    `json:"id"`
-	Title       string `json:"title"`
-	Description string `json:"description"`
+	Id          int      `json:"id"`
+	Title       string   `json:"title"`
+	Description string   `json:"description"`
+	Columns     []Column `json:"columns"`
+	Lanes       []Lane   `json:"lanes"`
+	Cards       []Card   `json:"cards"`
+}
+
+type Column struct {
+	Id         int         `json:"id"`
+	Title      string      `json:"title"`
+	Subcolumns []Subcolumn `json:"subcolumns"`
+}
+
+type Subcolumn struct {
+	Id    int    `json:"id"`
+	Title string `json:"title"`
+}
+
+type Lane struct {
+	Id    int    `json:"id"`
+	Title string `json:"title"`
+}
+
+type Card struct {
+	Id        int    `json:"id"`
+	Title     string `json:"title"`
+	Owner     Owner  `json:"owner"`
+	Archived  bool   `json:"archived"`
+	Lane_id   int    `json:"lane_id"`
+	Column_id int    `json:"column_id"`
+}
+
+type Owner struct {
+	Id       int    `json:"id"`
+	Username string `json:"username"`
 }
 
 var contexts Contexts
 var spaces []Space
 var boards []Board
+var board Board
 
 func contains(account string, accounts []string) bool {
 	for _, a := range accounts {
@@ -280,6 +314,75 @@ func main() {
 							}
 							table.SetHeader([]string{"Id", "Title", "Description"})
 							table.Render()
+							return nil
+						},
+					},
+					{
+						Name: "cards",
+						Flags: []cli.Flag{
+							&cli.StringFlag{
+								Name:     "board",
+								Usage:    "board id",
+								Required: true,
+							},
+							&cli.StringFlag{
+								Name:     "column",
+								Usage:    "board column",
+								Required: false,
+							},
+							&cli.StringFlag{
+								Name:     "lane",
+								Usage:    "board lane",
+								Required: false,
+							},
+						},
+						Usage: "get list of board cards",
+						Action: func(cCtx *cli.Context) error {
+							resp, err := call(fmt.Sprintf("https://rubbles-stories.kaiten.ru/api/latest/boards/%v", cCtx.String("board")), "GET", apiKey)
+							if err != nil {
+								return fmt.Errorf("Could not get list of boards")
+							}
+							defer resp.Body.Close()
+
+							err = json.NewDecoder(resp.Body).Decode(&board)
+							if err != nil {
+								log.Fatal(err)
+							}
+
+							columns := make(map[int]string)
+							lanes := make(map[int]string)
+
+							for _, col := range board.Columns {
+								columns[col.Id] = col.Title
+								for _, subc := range col.Subcolumns {
+									columns[subc.Id] = subc.Title
+								}
+							}
+
+							for _, lane := range board.Lanes {
+								lanes[lane.Id] = lane.Title
+							}
+
+							column_id, err := strconv.Atoi(cCtx.String("column"))
+							lane_id, err := strconv.Atoi(cCtx.String("lane"))
+
+							if (column_id > 0) && (lane_id > 0) {
+								for _, card := range board.Cards {
+									if (card.Lane_id == lane_id) && (card.Column_id == column_id) {
+										var cardRow []string
+										cardRow = append(cardRow, strconv.Itoa(card.Id))
+										cardRow = append(cardRow, card.Title)
+										cardRow = append(cardRow, card.Owner.Username)
+										cardRow = append(cardRow, lanes[card.Lane_id])
+										cardRow = append(cardRow, columns[card.Column_id])
+										table.Append(cardRow)
+										table.SetHeader([]string{"Id", "Title", "Owner", "Lane", "Column"})
+										table.Render()
+									} else {
+										continue
+									}
+								}
+							}
 							return nil
 						},
 					},
