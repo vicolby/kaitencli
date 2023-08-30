@@ -7,6 +7,8 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"sort"
+
 	"strconv"
 	"time"
 
@@ -22,6 +24,7 @@ type Context struct {
 	Key    string `json:"key"`
 	Name   string `json:"name"`
 	Active bool   `json:"active"`
+	Board  string `json:"board"`
 }
 
 type Space struct {
@@ -42,25 +45,35 @@ type Column struct {
 	Id         int         `json:"id"`
 	Title      string      `json:"title"`
 	Subcolumns []Subcolumn `json:"subcolumns"`
+	SortOrder  float32     `json:"sort_order"`
 }
 
 type Subcolumn struct {
-	Id    int    `json:"id"`
-	Title string `json:"title"`
+	Id        int     `json:"id"`
+	Title     string  `json:"title"`
+	SortOrder float32 `json:"sort_order"`
 }
 
 type Lane struct {
-	Id    int    `json:"id"`
-	Title string `json:"title"`
+	Id        int     `json:"id"`
+	Title     string  `json:"title"`
+	SortOrder float32 `json:"sort_order"`
 }
 
 type Card struct {
-	Id        int    `json:"id"`
-	Title     string `json:"title"`
-	Owner     Owner  `json:"owner"`
-	Archived  bool   `json:"archived"`
-	Lane_id   int    `json:"lane_id"`
-	Column_id int    `json:"column_id"`
+	Id        int      `json:"id"`
+	Title     string   `json:"title"`
+	Owner     Owner    `json:"owner"`
+	Archived  bool     `json:"archived"`
+	Lane_id   int      `json:"lane_id"`
+	Column_id int      `json:"column_id"`
+	Members   []Member `json:"members"`
+}
+
+type Member struct {
+	Id       int    `json:"id"`
+	Username string `json:"username"`
+	Type     int    `json:"type"`
 }
 
 type Owner struct {
@@ -245,6 +258,33 @@ func main() {
 
 						},
 					},
+					{
+						Name:  "set",
+						Usage: "set active board id",
+						Action: func(cCtx *cli.Context) error {
+							board := cCtx.Args().First()
+							for index, context := range contexts.Contexts {
+								if context.Active == true {
+									contexts.Contexts[index].Board = board
+								}
+							}
+
+							newData, err := json.MarshalIndent(contexts, "", "    ")
+							if err != nil {
+								fmt.Println("Error marshaling JSON:", err)
+								return nil
+							}
+
+							err = os.WriteFile("contexts.json", newData, os.ModePerm)
+							if err != nil {
+								fmt.Println("Error writing JSON file:", err)
+								return nil
+							}
+
+							fmt.Println("Board set successfully.")
+							return nil
+						},
+					},
 				},
 			},
 			{
@@ -323,24 +363,20 @@ func main() {
 							&cli.StringFlag{
 								Name:     "board",
 								Usage:    "board id",
-								Required: true,
-							},
-							&cli.StringFlag{
-								Name:     "column",
-								Usage:    "board column",
-								Required: false,
-							},
-							&cli.StringFlag{
-								Name:     "lane",
-								Usage:    "board lane",
 								Required: false,
 							},
 						},
 						Usage: "get list of board cards",
 						Action: func(cCtx *cli.Context) error {
-							resp, err := call(fmt.Sprintf("https://rubbles-stories.kaiten.ru/api/latest/boards/%v", cCtx.String("board")), "GET", apiKey)
+							var board_id string
+							for _, context := range contexts.Contexts {
+								if context.Active == true && context.Board != "" && cCtx.String("board") == "" {
+									board_id = context.Board
+								}
+							}
+							resp, err := call(fmt.Sprintf("https://rubbles-stories.kaiten.ru/api/latest/boards/%v", board_id), "GET", apiKey)
 							if err != nil {
-								return fmt.Errorf("Could not get list of boards")
+								return fmt.Errorf("Could not get list of boards for board_id %v", board_id)
 							}
 							defer resp.Body.Close()
 
@@ -363,26 +399,32 @@ func main() {
 								lanes[lane.Id] = lane.Title
 							}
 
-							column_id, err := strconv.Atoi(cCtx.String("column"))
-							lane_id, err := strconv.Atoi(cCtx.String("lane"))
+							sort.Slice(board.Cards, func(i, j int) bool {
+								return board.Cards[i].Lane_id < board.Cards[j].Lane_id
+							})
 
-							if (column_id > 0) && (lane_id > 0) {
-								for _, card := range board.Cards {
-									if (card.Lane_id == lane_id) && (card.Column_id == column_id) {
-										var cardRow []string
-										cardRow = append(cardRow, strconv.Itoa(card.Id))
-										cardRow = append(cardRow, card.Title)
-										cardRow = append(cardRow, card.Owner.Username)
-										cardRow = append(cardRow, lanes[card.Lane_id])
-										cardRow = append(cardRow, columns[card.Column_id])
-										table.Append(cardRow)
-										table.SetHeader([]string{"Id", "Title", "Owner", "Lane", "Column"})
-										table.Render()
+							for _, card := range board.Cards {
+								var responsible string
+								for _, member := range card.Members {
+									if member.Type == 2 {
+										responsible = member.Username
 									} else {
-										continue
+										responsible = ""
 									}
 								}
+								var Row []string
+								Row = append(Row, lanes[card.Lane_id])
+								Row = append(Row, card.Title)
+								Row = append(Row, card.Owner.Username)
+								Row = append(Row, responsible)
+								Row = append(Row, strconv.Itoa(card.Id))
+								Row = append(Row, columns[card.Column_id])
+								table.Append(Row)
 							}
+
+							table.SetHeader([]string{"Lane", "Title", "Owner", "Responsible", "Id", "Column"})
+							table.Render()
+
 							return nil
 						},
 					},
